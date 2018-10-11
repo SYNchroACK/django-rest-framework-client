@@ -1,3 +1,5 @@
+Work originally developed by David Karchmer (dkarchmer)
+
 # Strato Python API Package
 
 [![Build Status](https://travis-ci.org/dkarchmer/django-rest-framework-client.svg?branch=master)](https://travis-ci.org/dkarchmer/django-rest-framework-client)

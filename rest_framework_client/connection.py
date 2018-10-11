@@ -1,10 +1,9 @@
-__author__ = 'dkarchmer'
-
 """
-See https://gist.github.com/dkarchmer/d85e55f9ed5450ba58cb
-This API generically supports DjangoRestFramework based APIs
+This API client generically supports Django Rest Framework based APIs
+
 It is based on https://github.com/samgiles/slumber, but customized for
 Django Rest Frameworks, and the use of TokenAuthentication.
+
 Usage:
     # Assuming
     # v1_api_router.register(r'some_model', SomeModelViewSet)
@@ -24,21 +23,37 @@ Usage:
     obj_one = api.some_model(1).get()
     api.logout()
 """
-import json
+
+from urllib.parse import urljoin
+
 import requests
-import logging
+import json
 import os
+
 from .exceptions import *
 
-API_PREFIX = 'api/v1'
-DEFAULT_HEADERS = {'Content-Type': 'application/json'}
-DEFAULT_TOKEN_TYPE = 'jwt'
-DEFAULT_TOKEN_FORMAT = 'JWT {token}'
 
-logger = logging.getLogger(__name__)
+DEFAULT_OPTIONS = {
+    'DOMAIN': 'http://127.0.0.1',
+    'PREFIX_PATH': '/api/v1/',
+    'LOGIN_PATH': '/auth/token/login/',
+    'LOGOUT_PATH': '/auth/token/logout/',
+    'TOKEN_KEY': 'auth_token',
+    'TOKEN_FORMAT': 'Token {token}',
+    'HEADERS': {
+        'Content-Type': 'application/json'
+    }
+}
 
 
-class RestResource(object):
+def join_url(paths):
+    url = ""
+    for path in paths:
+        url = urljoin(url, path)
+    return url
+
+
+class RESTResource(object):
     """
     Resource provides the main functionality behind a Django Rest Framework based API. It handles the
     attribute -> url, kwarg -> query param, and other related behind the scenes
@@ -49,8 +64,6 @@ class RestResource(object):
 
     def __init__(self, *args, **kwargs):
         self._store = kwargs
-        if 'use_token' not in self._store:
-            self._store['use_token'] = False
 
     def __call__(self, id=None):
         """
@@ -60,31 +73,24 @@ class RestResource(object):
         a specific resource by it's ID.
         """
 
-        kwargs = {
-            'token': self._store['token'],
-            'use_token': self._store['use_token'],
-            'token_format': self._store['token_format'],
-            'base_url': self._store['base_url']
-        }
+        url = join_url([self._store['base_url'], str(id)+"/"])
 
-        new_url = self._store['base_url']
-        if id is not None:
-            new_url = '{0}{1}/'.format(new_url, id)
-
-        if not new_url.endswith('/'):
-            new_url += '/'
-
-        kwargs['base_url'] = new_url
+        kwargs = self._copy_kwargs(self._store)
+        kwargs.update({'base_url': url})
 
         return self._get_resource(**kwargs)
 
     def __getattr__(self, item):
+
         # Don't allow access to 'private' by convention attributes.
+
         if item.startswith("_"):
             raise AttributeError(item)
 
+        url = join_url([self._store['base_url'], item+"/"])
+
         kwargs = self._copy_kwargs(self._store)
-        kwargs.update({'base_url': '{0}{1}/'.format(self._store["base_url"], item)})
+        kwargs.update({'base_url': url})
 
         return self._get_resource(**kwargs)
 
@@ -148,12 +154,9 @@ class RestResource(object):
         return url
 
     def _get_header(self):
-        headers = DEFAULT_HEADERS
-        if self._store['use_token']:
-            if not "token" in self._store:
-                raise RestBaseException('No Token')
-            authorization_str = self._store['token_format'].format(token=self._store["token"])
-            headers['Authorization'] = authorization_str
+        headers = DEFAULT_OPTIONS['HEADERS']
+        if self._store['token']:
+            headers['Authorization'] = self._store['token_format'].format(token=self._store["token"])
 
         return headers
 
@@ -192,7 +195,9 @@ class RestResource(object):
         return self._process_response(resp)
 
     def delete(self, **kwargs):
+
         resp = requests.delete(self.url(), headers=self._get_header())
+
         if 200 <= resp.status_code <= 299:
             if resp.status_code == 204:
                 return True
@@ -202,65 +207,66 @@ class RestResource(object):
             return False
 
     def _get_resource(self, **kwargs):
+        x = self.__class__(**kwargs)
         return self.__class__(**kwargs)
 
-class Api(object):
-    token = None
-    token_type = DEFAULT_TOKEN_TYPE
-    token_format = DEFAULT_TOKEN_FORMAT
-    resource_class = RestResource
-    use_token = True
+class RESTAPI(object):
+
+    resource_class = RESTResource
     options = None
+    token = None
 
-    def __init__(self, options):
+    def __init__(self, options={}):
+        
+        for option in DEFAULT_OPTIONS.keys():
+            if option not in options:
+                options[option] = DEFAULT_OPTIONS[option]
+
         self.options = options
-        if 'DOMAIN' not in options:
-            raise RestBaseException("DOMAIN is missing in options")
 
-        if 'API_PREFIX' not in options:
-            options['API_PREFIX'] = API_PREFIX
-        self.base_url = '{0}/{1}'.format(self.options['DOMAIN'], options['API_PREFIX'] )
-        if 'TOKEN_TYPE' in options:
-            self.token_type = options['TOKEN_TYPE']
-        if 'TOKEN_FORMAT' in options:
-            self.token_format = options['TOKEN_FORMAT']
+        url = join_url([self.options['DOMAIN'], self.options['PREFIX_PATH']])
 
-
-    def set_token(self, token):
+    def set_token(self, token: str):
         self.token = token
 
-    def login(self, password, email):
-        assert('LOGIN' in self.options)
-        data = {'email': email, 'password': password}
-        url = '{0}/{1}'.format(self.base_url, self.options['LOGIN'])
+    def login(self, credentials: dict):
 
-        payload = json.dumps(data)
-        r = requests.post(url, data=payload, headers=DEFAULT_HEADERS)
-        if r.status_code == 200:
-            content = json.loads(r.content.decode())
-            if self.token_type in content:
-                self.token = content[self.token_type]
+        if credentials is None:
+            raise RestBaseException("Credentials not provided")
 
-            self.username = content['username']
-            logger.info('Welcome @{0} (token: {1})'.format(self.username, self.token))
-            return True
-        else:
-            logger.error('Login failed: ' + str(r.status_code) + ' ' + r.content.decode())
+        url = join_url([self.options['DOMAIN'], self.options['PREFIX_PATH'], self.options['LOGIN_PATH']])
+              
+        data = json.dumps(credentials)
+
+        response = requests.post(url, data=data, headers=self.options['HEADERS'])
+
+        if response.status_code != 200:
             return False
+            
+        content = json.loads(response.content.decode())
+
+        if self.options['TOKEN_KEY'] in content:
+            self.token = content[self.options['TOKEN_KEY']]
+        else:
+            raise RestBaseException("Token not found on response")
+
+        return True
 
     def logout(self):
-        assert('LOGOUT' in self.options)
-        url = '{0}/{1}'.format(self.base_url, self.options['LOGOUT'])
-        headers = DEFAULT_HEADERS
-        headers['Authorization'] = self.token_format.format(token=self.token)
 
-        r = requests.post(url, headers=headers)
-        if r.status_code == 204:
-            logger.info('Goodbye @{0}'.format(self.username))
-            self.username = None
-            self.token = None
-        else:
-            logger.error('Logout failed: ' + str(r.status_code) + ' ' + r.content.decode())
+        url = join_url([self.options['DOMAIN'], self.options['PREFIX_PATH'], self.options['LOGOUT_PATH']])
+              
+
+        headers = self.options['HEADERS']
+        headers['Authorization'] = self.options['TOKEN_FORMAT'].format(token=self.token)
+
+        response = requests.post(url, headers=headers)
+        
+        if response.status_code != 204:
+            return False
+
+        self.token = None
+        return True
 
     def __getattr__(self, item):
         """
@@ -273,14 +279,14 @@ class Api(object):
         if item.startswith("_"):
             raise AttributeError(item)
 
+
+        test = join_url([self.options['DOMAIN'], self.options['PREFIX_PATH'], item+"/" ])
+
         kwargs = {
             'token': self.token,
-            'base_url': self.base_url,
-            'use_token': self.use_token,
-            'token_format': self.token_format,
+            'token_format': self.options['TOKEN_FORMAT'],
+            'base_url': join_url([self.options['DOMAIN'], self.options['PREFIX_PATH'], item+"/" ]),
         }
-        kwargs.update({'base_url': '{0}/{1}/'.format(kwargs['base_url'], item)})
-
         return self._get_resource(**kwargs)
 
     def _get_resource(self, **kwargs):

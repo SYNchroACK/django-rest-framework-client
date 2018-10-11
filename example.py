@@ -1,51 +1,75 @@
-import getpass
-import logging
+from rest_framework_client.connection import RESTAPI
+
 import sys
-from pprint import pprint
-from drf_client.connection import Api as RestApi
 
-logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-
-logger = logging.getLogger(__name__)
-
-email = input('Email? ')
-password = getpass.getpass()
 
 options = {
-    'DOMAIN': 'http://127.0.0.1:8000',
-    'API_PREFIX': 'api/v1',
-    'TOKEN_TYPE': 'jwt',
-    'TOKEN_FORMAT': 'JWT {token}',
-    'LOGIN': 'auth/login/',
-    'LOGOUT': 'auth/logout/',
+    'DOMAIN': 'http://192.168.56.55',
+    'PREFIX_PATH': '/',
+    'LOGIN_PATH': '/auth/token/login/',
+    'LOGOUT_PATH': '/auth/token/logout/',
+    'TOKEN_TYPE': 'auth_token',
+    'TOKEN_FORMAT': 'Token {token}',
 }
 
-c = RestApi(options)
+credentials = {
+    'email': 'example@example.com',
+    'username': 'example',
+    'password': 'password',
+}
 
-ok = c.login(email=email, password=password)
-if ok:
+api = RESTAPI(options)
 
-    # GET some data
-    my_objects = c.org.get()
-    for obj in my_objects['results']:
-        pprint(obj)
-        logger.info('------------------------------')
+print("== User LOGIN")
+if not api.login(credentials):
+    print("Login failed ...")    
+    sys.exit(-1)
 
-    logger.info('------------------------------')
-    logger.info('------------------------------')
-    my_object = c.org('arch-internal').get()
-    pprint(my_object)
-    logger.info('------------------------------')
-    logger.info('------------------------------')
+print("== Systems GET")
+systems = api.systems.get()
 
-    payload = {
-        'data1': 'val1',
-        'data2': 'val2',
-    }
+print(systems)
 
-    resp = c.org.post(data=payload)
-    pprint(resp)
+if systems:
+    print("== Systems DELETE")
+    print("Deleting: %s" % systems[0])
+    res = api.systems(systems[0]['id']).delete()
+    print(res)
 
-    logger.info('------------------------------')
+system = {
+    'hostname': 'test1',
+    'ip': '8.8.8.8',
+    'netmask': '255.255.255.0',
+    'broadcast': '192.168.56.255',
+    'interface': 'eth1'
+}
 
-    c.logout()
+print("== Systems POST")
+print("Creating: %s" % system)
+api.systems.post(system)
+
+systems = api.systems.get()
+
+system = {
+    'hostname': 'test2',
+    'ip': '8.8.3.2',
+    'netmask': '255.255.255.0',
+    'broadcast': '192.168.56.255',
+    'interface': 'eth1'
+}
+
+print("Putting: %s" % system)
+api.systems(systems[0]['id']).put(system)
+
+system = {
+    'broadcast': '192.168.56.252',
+    'interface': 'eth4'
+}
+
+print("Patching: %s" % system)
+api.systems(systems[0]['id']).patch(system)
+
+if api.logout():
+    print("Logout successfull")
+else:
+    print("Logout not successfull")
