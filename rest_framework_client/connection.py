@@ -35,7 +35,7 @@ from .exceptions import *
 
 DEFAULT_OPTIONS = {
     'DOMAIN': 'http://127.0.0.1',
-    'PREFIX_PATH': '/api/v1/',
+    'PREFIX_PATH': '/',
     'LOGIN_PATH': '/auth/token/login/',
     'LOGOUT_PATH': '/auth/token/logout/',
     'TOKEN_KEY': 'auth_token',
@@ -149,6 +149,7 @@ class RESTResource(object):
 
     def url(self, args=None):
         url = self._store["base_url"]
+
         if args:
             url += '?{0}'.format(args)
         return url
@@ -215,6 +216,7 @@ class RESTAPI(object):
     resource_class = RESTResource
     options = None
     token = None
+    base_url = None
 
     def __init__(self, options={}):
         
@@ -224,7 +226,10 @@ class RESTAPI(object):
 
         self.options = options
 
-        url = join_url([self.options['DOMAIN'], self.options['PREFIX_PATH']])
+        if self.options['PREFIX_PATH'] == DEFAULT_OPTIONS['PREFIX_PATH']:
+            self.base_url = self.options['DOMAIN']
+        else:
+            self.base_url = join_url([self.options['DOMAIN'], self.options['PREFIX_PATH']])
 
     def set_token(self, token: str):
         self.token = token
@@ -234,7 +239,7 @@ class RESTAPI(object):
         if credentials is None:
             raise RestBaseException("Credentials not provided")
 
-        url = join_url([self.options['DOMAIN'], self.options['PREFIX_PATH'], self.options['LOGIN_PATH']])
+        url = join_url([self.base_url, self.options['LOGIN_PATH']])
               
         data = json.dumps(credentials)
 
@@ -254,7 +259,7 @@ class RESTAPI(object):
 
     def logout(self):
 
-        url = join_url([self.options['DOMAIN'], self.options['PREFIX_PATH'], self.options['LOGOUT_PATH']])
+        url = join_url([self.base_url, self.options['LOGOUT_PATH']])
               
 
         headers = self.options['HEADERS']
@@ -279,13 +284,10 @@ class RESTAPI(object):
         if item.startswith("_"):
             raise AttributeError(item)
 
-
-        test = join_url([self.options['DOMAIN'], self.options['PREFIX_PATH'], item+"/" ])
-
         kwargs = {
             'token': self.token,
             'token_format': self.options['TOKEN_FORMAT'],
-            'base_url': join_url([self.options['DOMAIN'], self.options['PREFIX_PATH'], item+"/" ]),
+            'base_url': join_url([self.base_url, item+"/" ]),
         }
         return self._get_resource(**kwargs)
 
