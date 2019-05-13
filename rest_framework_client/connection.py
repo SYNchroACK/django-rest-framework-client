@@ -151,7 +151,10 @@ class RESTResource(object):
         url = self._store["base_url"]
 
         if args:
-            url += '?{0}'.format(args)
+            url += "?"
+            for key, value in args.items():
+                url += '{0}={1}&'.format(key, value)
+            # url += '?{0}'.format(args)
         return url
 
     def _get_header(self):
